@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#1a1a2e">
+<link rel="manifest" href="manifest.json">
+<title>语音阅读器</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #1a1a2e; --bg2: #16213e; --bg3: #0f3460;
+  --text: #e0e0e0; --text2: #a0a0b0; --accent: #e94560; --accent2: #533483;
+  --card: #16213e; --border: #2a2a4a; --success: #4ecca3;
+}
+body {
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100vh; padding-bottom: env(safe-area-inset-bottom, 0);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 顶部栏 */
+.header {
+  background: var(--bg2); padding: 14px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100;
+}
+.header h1 { font-size: 18px; font-weight: 600; }
+.header-actions { display: flex; gap: 8px; }
+.header-actions button {
+  background: var(--bg3); color: var(--text); border: none; border-radius: 8px;
+  padding: 8px 14px; font-size: 14px; cursor: pointer;
+}
+
+/* 页面容器 */
+.page { display: none; padding: 16px; }
+.page.active { display: block; }
+
+/* 文件库页 */
+.empty-state {
+  text-align: center; padding: 60px 20px; color: var(--text2);
+}
+.empty-state .icon { font-size: 48px; margin-bottom: 16px; }
+.empty-state p { font-size: 15px; line-height: 1.6; }
+
+.file-item {
+  background: var(--card); border-radius: 12px; padding: 14px 16px;
+  margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;
+  border: 1px solid var(--border); cursor: pointer; transition: background 0.2s;
+}
+.file-item:active { background: var(--bg3); }
+.file-info h3 { font-size: 15px; margin-bottom: 4px; }
+.file-info span { font-size: 12px; color: var(--text2); }
+.file-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.file-actions button {
+  background: none; border: none; color: var(--text2); font-size: 18px;
+  padding: 6px; cursor: pointer;
+}
+.file-actions .del-btn:active { color: var(--accent); }
+
+.import-btn {
+  position: fixed; bottom: calc(70px + env(safe-area-inset-bottom, 0px)); right: 20px;
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--accent); color: #fff; border: none;
+  font-size: 28px; cursor: pointer; z-index: 90;
+  box-shadow: 0 4px 16px rgba(233,69,96,0.4);
+  display: flex; align-items: center; justify-content: center;
+}
+.import-btn:active { transform: scale(0.92); }
+input[type="file"] { display: none; }
+
+/* 阅读页 */
+.reader-header {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 16px;
+}
+.reader-header .back-btn {
+  background: none; border: none; color: var(--text); font-size: 22px;
+  padding: 4px; cursor: pointer;
+}
+.reader-header h2 {
+  font-size: 16px; font-weight: 500; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.reader-content {
+  font-size: 16px; line-height: 1.8; color: var(--text);
+  padding-bottom: 180px; white-space: pre-wrap; word-break: break-word;
+}
+.reader-content .sentence { padding: 2px 0; border-radius: 4px; transition: background 0.2s; }
+.reader-content .sentence.active { background: rgba(233,69,96,0.2); color: #fff; }
+
+/* 播放控制栏 */
+.player-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
+  background: var(--bg2); border-top: 1px solid var(--border);
+  padding: 10px 16px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0));
+  display: none; flex-direction: column; gap: 8px;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+}
+.player-bar.visible { display: flex; }
+
+.player-progress {
+  display: flex; align-items: center; gap: 10px;
+}
+.progress-bar {
+  flex: 1; height: 4px; background: var(--border); border-radius: 2px;
+  overflow: visible; position: relative; padding: 12px 0;
+  background-clip: content-box; cursor: pointer;
+}
+.progress-fill {
+  height: 4px; background: var(--accent); border-radius: 2px;
+  position: absolute; top: 12px; left: 0; transition: width 0.3s;
+}
+.progress-text { font-size: 11px; color: var(--text2); white-space: nowrap; min-width: 80px; text-align: right; }
+
+.player-controls {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.player-controls button {
+  background: var(--bg3); color: var(--text); border: none; border-radius: 50%;
+  width: 44px; height: 44px; font-size: 18px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.player-controls .play-btn {
+  width: 52px; height: 52px; font-size: 22px;
+  background: var(--accent); color: #fff;
+}
+.player-controls .stop-btn { background: #4a1a2e; }
+
+.player-extras {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;
+}
+.player-extras button, .player-extras select {
+  background: var(--bg); color: var(--text2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+}
+.player-extras select { max-width: 140px; }
+.player-extras .active-tag { color: var(--success); border-color: var(--success); }
+.timer-display { font-size: 12px; color: var(--accent); min-width: 40px; text-align: center; }
+
+/* 设置页 */
+.setting-group {
+  background: var(--card); border-radius: 12px; padding: 16px;
+  margin-bottom: 12px; border: 1px solid var(--border);
+}
+.setting-group h3 { font-size: 14px; color: var(--text2); margin-bottom: 12px; }
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-row label { font-size: 14px; }
+.setting-row select, .setting-row input[type="range"] { max-width: 160px; }
+.setting-row select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 13px;
+}
+.setting-row input[type="range"] { width: 140px; }
+.test-btn {
+  background: var(--accent); color: #fff; border: none; border-radius: 8px;
+  padding: 10px 20px; font-size: 14px; cursor: pointer; width: 100%;
+  margin-top: 8px;
+}
+.test-btn:active { opacity: 0.8; }
+
+/* 底部导航 */
+.tab-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 150;
+  background: var(--bg2); border-top: 1px solid var(--border);
+  display: flex; padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.tab-bar.hidden { display: none; }
+.tab-bar button {
+  flex: 1; background: none; border: none; color: var(--text2);
+  padding: 10px 0; font-size: 12px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.tab-bar button .tab-icon { font-size: 20px; }
+.tab-bar button.active { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- 文件库页 -->
+<div id="page-library" class="page active">
+  <div class="header">
+    <h1>语音阅读器</h1>
+  </div>
+  <div id="file-list" style="padding:16px;padding-bottom:120px;"></div>
+  <button class="import-btn" onclick="document.getElementById('file-input').click()">+</button>
+  <input type="file" id="file-input" accept=".md,.txt,.text,.markdown" multiple>
+</div>
+
+<!-- 阅读页 -->
+<div id="page-reader" class="page">
+  <div class="reader-header">
+    <button class="back-btn" onclick="showPage('library')">&#8592;</button>
+    <h2 id="reader-title"></h2>
+  </div>
+  <div id="reader-content" class="reader-content"></div>
+</div>
+
+<!-- 设置页 -->
+<div id="page-settings" class="page">
+  <div class="header"><h1>设置</h1></div>
+  <div style="padding:16px;padding-bottom:80px;">
+    <div class="setting-group">
+      <h3>语音引擎</h3>
+      <div class="setting-row">
+        <label>默认语音</label>
+        <select id="set-voice"></select>
+      </div>
+      <div class="setting-row">
+        <label>语速</label>
+        <input type="range" id="set-rate" min="0.5" max="3" step="0.25" value="1">
+        <span id="set-rate-val">1.00x</span>
+      </div>
+      <div class="setting-row">
+        <label>音调</label>
+        <input type="range" id="set-pitch" min="0.5" max="2" step="0.1" value="1">
+        <span id="set-pitch-val">1.0</span>
+      </div>
+      <button class="test-btn" id="test-btn" onclick="testVoice()">播放测试</button>
+    </div>
+    <div class="setting-group">
+      <h3>阅读设置</h3>
+      <div class="setting-row">
+        <label>定时停止</label>
+        <select id="set-timer">
+          <option value="0">不定时</option>
+          <option value="5">5 分钟</option>
+          <option value="10">10 分钟</option>
+          <option value="15">15 分钟</option>
+          <option value="20">20 分钟</option>
+          <option value="30">30 分钟</option>
+          <option value="45">45 分钟</option>
+          <option value="60">60 分钟</option>
+          <option value="90">90 分钟</option>
+          <option value="120">120 分钟</option>
+        </select>
+      </div>
+    </div>
+    <div class="setting-group">
+      <h3>数据管理</h3>
+      <button class="test-btn" style="background:var(--bg3);" onclick="if(confirm('确定清空所有导入的文件？'))clearAllFiles()">清空文件库</button>
+    </div>
+  </div>
+</div>
+
+<!-- 播放控制栏 -->
+<div id="player-bar" class="player-bar">
+  <div class="player-progress">
+    <div class="progress-bar" id="progress-bar">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+    <span class="progress-text" id="progress-text">0/0</span>
+  </div>
+  <div class="player-controls">
+    <button onclick="jumpSentence(-1)">&#9198;</button>
+    <button class="play-btn" id="play-btn" onclick="togglePause()">&#9654;</button>
+    <button onclick="jumpSentence(1)">&#9197;</button>
+    <button class="stop-btn" onclick="stopReading()">&#9209;</button>
+  </div>
+  <div class="player-extras">
+    <button id="speed-btn" onclick="cycleSpeed()">1.00x</button>
+    <select id="bar-voice" onchange="switchVoice(this.value)"></select>
+    <button id="timer-btn" onclick="cycleTimer()">定时</button>
+    <span class="timer-display" id="timer-display"></span>
+  </div>
+</div>
+
+<!-- 底部导航 -->
+<div id="tab-bar" class="tab-bar">
+  <button onclick="showPage('library')" id="tab-library" class="active">
+    <span class="tab-icon">&#128218;</span>文件库
+  </button>
+  <button onclick="showPage('settings')" id="tab-settings">
+    <span class="tab-icon">&#9881;</span>设置
+  </button>
+</div>
+
+<script>
+// ==================== Edge TTS ====================
+
+const TRUSTED_CLIENT_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
+const CHROMIUM_FULL_VERSION = '143.0.3650.75';
+const SEC_MS_GEC_VERSION = `1-${CHROMIUM_FULL_VERSION}`;
+const WIN_EPOCH = 11644473600;
+
+const EDGE_VOICES = [
+  { id: 'zh-CN-XiaoxiaoNeural', name: '晓晓', desc: '女·温暖亲和' },
+  { id: 'zh-CN-XiaoyiNeural', name: '晓伊', desc: '女·亲切自然' },
+  { id: 'zh-CN-YunxiNeural', name: '云希', desc: '男·阳光青年' },
+  { id: 'zh-CN-YunyangNeural', name: '云扬', desc: '男·新闻播报' },
+  { id: 'zh-CN-YunjianNeural', name: '云健', desc: '男·体育解说' },
+  { id: 'zh-CN-YunxiaNeural', name: '云夏', desc: '男·少年' },
+  { id: 'zh-CN-liaoning-XiaobeiNeural', name: '晓北', desc: '女·东北话' },
+  { id: 'zh-CN-shaanxi-XiaoniNeural', name: '晓妮', desc: '女·陕西话' },
+  { id: 'zh-HK-HiuGaaiNeural', name: '晓佳', desc: '女·粤语' },
+  { id: 'zh-HK-HiuMaanNeural', name: '晓曼', desc: '女·粤语' },
+  { id: 'zh-HK-WanLungNeural', name: '云龙', desc: '男·粤语' },
+  { id: 'zh-TW-HsiaoChenNeural', name: '晓臻', desc: '女·台湾' },
+  { id: 'zh-TW-HsiaoYuNeural', name: '晓雨', desc: '女·台湾' },
+  { id: 'zh-TW-YunJheNeural', name: '云哲', desc: '男·台湾' },
+];
+
+function uuid() {
+  return 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16));
+}
+
+function escapeXml(t) {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+
+async function generateSecMsGec() {
+  let ticks = Date.now() / 1000;
+  ticks += WIN_EPOCH;
+  ticks -= ticks % 300;
+  ticks *= 1e7;
+  const data = new TextEncoder().encode(`${Math.floor(ticks)}${TRUSTED_CLIENT_TOKEN}`);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+function edgeTTSSpeak(text, voiceId, rate, pitch) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const connId = uuid();
+      const secMsGec = await generateSecMsGec();
+      const wsUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&ConnectionId=${connId}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=${SEC_MS_GEC_VERSION}`;
+
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+      const audioChunks = [];
+      let done = false;
+
+      const timer = setTimeout(() => {
+        if (!done) { done = true; ws.close(); reject(new Error('超时')); }
+      }, 15000);
+
+      ws.onopen = () => {
+        const rateStr = rate >= 1 ? `+${Math.round((rate-1)*100)}%` : `-${Math.round((1-rate)*100)}%`;
+        const pitchStr = pitch >= 1 ? `+${Math.round((pitch-1)*50)}Hz` : `-${Math.round((1-pitch)*50)}Hz`;
+        ws.send('Content-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}');
+        const reqId = uuid();
+        const lang = voiceId.startsWith('zh-HK') ? 'zh-HK' : voiceId.startsWith('zh-TW') ? 'zh-TW' : 'zh-CN';
+        const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='${lang}'><voice name='${voiceId}'><prosody rate='${rateStr}' pitch='${pitchStr}'>${escapeXml(text)}</prosody></voice></speak>`;
+        ws.send(`X-RequestId:${reqId}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n${ssml}`);
+      };
+
+      ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          const view = new DataView(event.data);
+          if (view.byteLength > 2) {
+            const headerLen = view.getUint16(0);
+            const start = 2 + headerLen;
+            if (start < view.byteLength) audioChunks.push(new Uint8Array(event.data, start));
+          }
+        } else if (typeof event.data === 'string' && event.data.includes('Path:turn.end')) {
+          clearTimeout(timer); done = true; ws.close();
+          if (audioChunks.length === 0) { reject(new Error('无音频数据')); return; }
+          const total = audioChunks.reduce((s, b) => s + b.byteLength, 0);
+          const result = new Uint8Array(total);
+          let off = 0;
+          for (const c of audioChunks) { result.set(c, off); off += c.byteLength; }
+          resolve(result.buffer);
+        }
+      };
+
+      ws.onerror = () => { clearTimeout(timer); if (!done) { done = true; reject(new Error('连接失败')); } };
+      ws.onclose = () => {
+        clearTimeout(timer);
+        if (!done) {
+          done = true;
+          if (audioChunks.length > 0) {
+            const total = audioChunks.reduce((s, b) => s + b.byteLength, 0);
+            const result = new Uint8Array(total); let off = 0;
+            for (const c of audioChunks) { result.set(c, off); off += c.byteLength; }
+            resolve(result.buffer);
+          } else { reject(new Error('连接关闭')); }
+        }
+      };
+    } catch (e) { reject(e); }
+  });
+}
+
+// ==================== 文本处理 ====================
+
+function stripMarkdown(text) {
+  return text
+    .replace(/^---[\s\S]*?---\n*/m, '')
+    .replace(/^#{1,6}\s+/gm, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1').replace(/_(.+?)_/g, '$1').replace(/~~(.+?)~~/g, '$1')
+    .replace(/`{1,3}[^`]*`{1,3}/g, '').replace(/!\[.*?\]\(.*?\)/g, '').replace(/\[(.+?)\]\(.*?\)/g, '$1')
+    .replace(/^>\s+/gm, '').replace(/^[-*+]\s+/gm, '').replace(/^\d+\.\s+/gm, '')
+    .replace(/^---+$/gm, '').replace(/\|/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function splitSentences(text) {
+  const raw = text.split(/(?<=[。！？!?\n])\s*/);
+  const result = []; let buffer = '';
+  for (const s of raw) {
+    const t = s.trim(); if (!t) continue;
+    buffer += t;
+    if (buffer.length >= 5) { result.push(buffer); buffer = ''; }
+  }
+  if (buffer.trim()) result.push(buffer.trim());
+  return result;
+}
+
+// ==================== 状态管理 ====================
+
+let settings = {
+  voiceId: 'zh-CN-XiaoxiaoNeural', rate: 1.0, pitch: 1.0, timerMinutes: 0,
+};
+let files = []; // { id, name, text, addedDate }
+let currentFileId = null;
+let sentences = [];
+let currentIndex = 0;
+let isReading = false;
+let isPaused = false;
+let speakGen = 0;
+let currentAudio = null;
+let timerInterval = null;
+let timerRemaining = 0;
+
+function loadState() {
+  try {
+    const s = localStorage.getItem('vr_settings');
+    if (s) settings = { ...settings, ...JSON.parse(s) };
+    const f = localStorage.getItem('vr_files');
+    if (f) files = JSON.parse(f);
+  } catch (_) {}
+}
+
+function saveSettings() { localStorage.setItem('vr_settings', JSON.stringify(settings)); }
+function saveFiles() { localStorage.setItem('vr_files', JSON.stringify(files)); }
+
+// ==================== 文件管理 ====================
+
+function renderFileList() {
+  const container = document.getElementById('file-list');
+  if (files.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div class="icon">&#128214;</div><p>还没有导入文件<br>点击右下角 + 导入 .md 或 .txt 文件</p></div>';
+    return;
+  }
+  container.innerHTML = files.map(f => `
+    <div class="file-item" onclick="openFile('${f.id}')">
+      <div class="file-info">
+        <h3>${esc(f.name)}</h3>
+        <span>${f.text.length} 字 · ${f.addedDate}</span>
+      </div>
+      <div class="file-actions">
+        <button class="del-btn" onclick="event.stopPropagation();deleteFile('${f.id}')">&#128465;</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+document.getElementById('file-input').addEventListener('change', async (e) => {
+  const fileList = e.target.files;
+  for (const file of fileList) {
+    const text = await file.text();
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const name = file.name.replace(/\.(md|txt|text|markdown)$/i, '');
+    files.push({ id, name, text, addedDate: new Date().toLocaleDateString('zh-CN') });
+  }
+  saveFiles();
+  renderFileList();
+  e.target.value = '';
+});
+
+function deleteFile(id) {
+  if (!confirm('确定删除？')) return;
+  files = files.filter(f => f.id !== id);
+  saveFiles();
+  renderFileList();
+}
+
+function clearAllFiles() {
+  files = [];
+  saveFiles();
+  renderFileList();
+}
+
+function openFile(id) {
+  const file = files.find(f => f.id === id);
+  if (!file) return;
+  currentFileId = id;
+
+  document.getElementById('reader-title').textContent = file.name;
+  const plain = stripMarkdown(file.text);
+  sentences = splitSentences(plain);
+
+  const contentEl = document.getElementById('reader-content');
+  contentEl.innerHTML = sentences.map((s, i) =>
+    `<span class="sentence" id="s-${i}">${esc(s)}</span>`
+  ).join('');
+
+  showPage('reader');
+  // 自动开始朗读
+  currentIndex = 0;
+  startReading();
+}
+
+// ==================== 播放控制 ====================
+
+function cancelCurrent() {
+  speakGen++;
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.src = '';
+    currentAudio = null;
+  }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+}
+
+function speakWithSystem(text, myGen, onEnd) {
+  const synth = window.speechSynthesis;
+  if (!synth) {
+    console.error('[TTS] 系统语音也不可用');
+    if (myGen === speakGen && onEnd) onEnd();
+    return;
+  }
+  synth.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = settings.rate;
+  utterance.pitch = settings.pitch;
+  utterance.lang = 'zh-CN';
+  const voices = synth.getVoices().filter(v => /^zh/i.test(v.lang));
+  if (voices.length > 0) utterance.voice = voices[0];
+  utterance.onend = () => { if (myGen === speakGen && onEnd) onEnd(); };
+  utterance.onerror = (e) => { if (e.error !== 'canceled' && e.error !== 'interrupted' && myGen === speakGen && onEnd) onEnd(); };
+  synth.speak(utterance);
+}
+
+let edgeTTSFailed = false; // 标记 Edge TTS 是否已失败，避免每句都超时等待
+
+async function speakSentence(text, onEnd) {
+  cancelCurrent();
+  const myGen = speakGen;
+
+  // 先尝试 Edge TTS（除非已确认失败）
+  if (!edgeTTSFailed) {
+    try {
+      const audioData = await edgeTTSSpeak(text, settings.voiceId, settings.rate, settings.pitch);
+      if (myGen !== speakGen) return;
+      if (!audioData || audioData.byteLength === 0) throw new Error('空数据');
+
+      const blob = new Blob([audioData], { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      currentAudio = audio;
+
+      audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; if (myGen === speakGen && onEnd) onEnd(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; if (myGen === speakGen && onEnd) onEnd(); };
+      await audio.play();
+      return; // Edge TTS 成功
+    } catch (e) {
+      console.warn('[Edge TTS 失败，回退系统语音]', e.message);
+      edgeTTSFailed = true; // 后续句子直接用系统语音，不再等超时
+      if (myGen !== speakGen) return;
+    }
+  }
+
+  // 回退到系统语音
+  if (myGen !== speakGen) return;
+  speakWithSystem(text, myGen, onEnd);
+}
+
+function speakNext() {
+  if (!isReading || currentIndex >= sentences.length) {
+    if (isReading) stopReading();
+    return;
+  }
+  highlightSentence(currentIndex);
+  updateProgress();
+  updateMediaSession();
+
+  speakSentence(sentences[currentIndex], () => {
+    currentIndex++;
+    updateProgress();
+    if (isReading && !isPaused) speakNext();
+  });
+}
+
+function startReading() {
+  isReading = true;
+  isPaused = false;
+  document.getElementById('player-bar').classList.add('visible');
+  document.getElementById('tab-bar').classList.add('hidden');
+  document.getElementById('play-btn').innerHTML = '&#9646;&#9646;';
+  document.getElementById('speed-btn').textContent = settings.rate.toFixed(2) + 'x';
+
+  if (settings.timerMinutes > 0) startTimer(settings.timerMinutes);
+
+  updateProgress();
+  initMediaSession();
+  speakNext();
+}
+
+function stopReading() {
+  cancelCurrent();
+  isReading = false;
+  isPaused = false;
+  clearHighlight();
+  clearTimer();
+  document.getElementById('player-bar').classList.remove('visible');
+  document.getElementById('tab-bar').classList.remove('hidden');
+}
+
+function togglePause() {
+  if (!isReading) return;
+  if (isPaused) {
+    isPaused = false;
+    document.getElementById('play-btn').innerHTML = '&#9646;&#9646;';
+    speakNext();
+  } else {
+    isPaused = true;
+    cancelCurrent();
+    document.getElementById('play-btn').innerHTML = '&#9654;';
+  }
+}
+
+function jumpSentence(delta) {
+  const newIdx = currentIndex + delta;
+  if (newIdx < 0 || newIdx >= sentences.length) return;
+  cancelCurrent();
+  currentIndex = newIdx;
+  highlightSentence(currentIndex);
+  updateProgress();
+  if (isReading && !isPaused) speakNext();
+}
+
+// ==================== UI 更新 ====================
+
+function highlightSentence(idx) {
+  clearHighlight();
+  const el = document.getElementById(`s-${idx}`);
+  if (el) {
+    el.classList.add('active');
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+function clearHighlight() {
+  const prev = document.querySelector('.sentence.active');
+  if (prev) prev.classList.remove('active');
+}
+
+function updateProgress() {
+  const total = sentences.length;
+  const pct = total > 0 ? (currentIndex / total) * 100 : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-text').textContent = `${currentIndex}/${total} 句`;
+}
+
+// 进度条点击/触摸
+const progressBar = document.getElementById('progress-bar');
+function onProgressTap(clientX) {
+  const r = progressBar.getBoundingClientRect();
+  const pct = (clientX - r.left) / r.width;
+  const idx = Math.floor(pct * sentences.length);
+  jumpSentence(idx - currentIndex);
+}
+progressBar.addEventListener('click', e => onProgressTap(e.clientX));
+progressBar.addEventListener('touchend', e => {
+  if (e.changedTouches.length > 0) { e.preventDefault(); onProgressTap(e.changedTouches[0].clientX); }
+});
+
+// ==================== 语速/语音/定时 ====================
+
+const SPEEDS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0];
+
+function cycleSpeed() {
+  let i = SPEEDS.indexOf(settings.rate);
+  i = (i + 1) % SPEEDS.length;
+  settings.rate = SPEEDS[i];
+  saveSettings();
+  document.getElementById('speed-btn').textContent = settings.rate.toFixed(2) + 'x';
+  document.getElementById('set-rate').value = settings.rate;
+  document.getElementById('set-rate-val').textContent = settings.rate.toFixed(2) + 'x';
+  if (isReading && !isPaused) { cancelCurrent(); speakNext(); }
+}
+
+function switchVoice(voiceId) {
+  settings.voiceId = voiceId;
+  saveSettings();
+  document.getElementById('set-voice').value = voiceId;
+  if (isReading && !isPaused) { cancelCurrent(); speakNext(); }
+}
+
+function cycleTimer() {
+  const opts = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+  let i = opts.indexOf(settings.timerMinutes);
+  settings.timerMinutes = opts[(i + 1) % opts.length];
+  saveSettings();
+  document.getElementById('set-timer').value = settings.timerMinutes;
+  updateTimerBtn();
+  if (settings.timerMinutes > 0 && isReading) startTimer(settings.timerMinutes);
+  else clearTimer();
+}
+
+function updateTimerBtn() {
+  const btn = document.getElementById('timer-btn');
+  btn.textContent = settings.timerMinutes > 0 ? settings.timerMinutes + 'm' : '定时';
+  btn.className = settings.timerMinutes > 0 ? 'active-tag' : '';
+}
+
+function startTimer(min) {
+  clearTimer();
+  timerRemaining = min * 60;
+  updateTimerDisplay();
+  timerInterval = setInterval(() => {
+    timerRemaining--;
+    updateTimerDisplay();
+    if (timerRemaining <= 0) { stopReading(); }
+  }, 1000);
+}
+
+function clearTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  timerRemaining = 0;
+  updateTimerDisplay();
+}
+
+function updateTimerDisplay() {
+  const el = document.getElementById('timer-display');
+  if (timerRemaining > 0) {
+    const m = Math.floor(timerRemaining / 60);
+    const s = timerRemaining % 60;
+    el.textContent = m + ':' + String(s).padStart(2, '0');
+  } else { el.textContent = ''; }
+}
+
+// ==================== Media Session（锁屏控制） ====================
+
+function initMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: document.getElementById('reader-title').textContent || '语音阅读',
+    artist: '语音阅读器',
+  });
+  navigator.mediaSession.setActionHandler('play', () => { if (isPaused) togglePause(); });
+  navigator.mediaSession.setActionHandler('pause', () => { if (!isPaused) togglePause(); });
+  navigator.mediaSession.setActionHandler('previoustrack', () => jumpSentence(-1));
+  navigator.mediaSession.setActionHandler('nexttrack', () => jumpSentence(1));
+  navigator.mediaSession.setActionHandler('stop', () => stopReading());
+}
+
+function updateMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  const file = files.find(f => f.id === currentFileId);
+  if (file) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: file.name,
+      artist: `${currentIndex + 1}/${sentences.length} 句`,
+    });
+  }
+}
+
+// ==================== 页面导航 ====================
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById(`page-${name}`).classList.add('active');
+  document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+  const tab = document.getElementById(`tab-${name}`);
+  if (tab) tab.classList.add('active');
+
+  if (name === 'reader') {
+    document.getElementById('tab-bar').classList.add('hidden');
+  } else {
+    if (!isReading) document.getElementById('tab-bar').classList.remove('hidden');
+    if (name === 'library') renderFileList();
+  }
+}
+
+// ==================== 设置页初始化 ====================
+
+function initSettingsUI() {
+  // 语音下拉
+  const voiceSelects = [document.getElementById('set-voice'), document.getElementById('bar-voice')];
+  for (const sel of voiceSelects) {
+    sel.innerHTML = '';
+    const groups = {
+      '普通话女声': EDGE_VOICES.filter(v => v.id.startsWith('zh-CN') && !v.id.includes('liaoning') && !v.id.includes('shaanxi') && v.desc.startsWith('女')),
+      '普通话男声': EDGE_VOICES.filter(v => v.id.startsWith('zh-CN') && !v.id.includes('liaoning') && !v.id.includes('shaanxi') && v.desc.startsWith('男')),
+      '方言': EDGE_VOICES.filter(v => v.id.includes('liaoning') || v.id.includes('shaanxi')),
+      '粤语': EDGE_VOICES.filter(v => v.id.startsWith('zh-HK')),
+      '台湾': EDGE_VOICES.filter(v => v.id.startsWith('zh-TW')),
+    };
+    for (const [gn, voices] of Object.entries(groups)) {
+      if (!voices.length) continue;
+      const g = document.createElement('optgroup'); g.label = gn;
+      for (const v of voices) {
+        const o = document.createElement('option');
+        o.value = v.id; o.textContent = v.name + '(' + v.desc + ')';
+        if (v.id === settings.voiceId) o.selected = true;
+        g.appendChild(o);
+      }
+      sel.appendChild(g);
+    }
+    sel.value = settings.voiceId;
+  }
+
+  document.getElementById('set-rate').value = settings.rate;
+  document.getElementById('set-rate-val').textContent = settings.rate.toFixed(2) + 'x';
+  document.getElementById('set-pitch').value = settings.pitch;
+  document.getElementById('set-pitch-val').textContent = settings.pitch.toFixed(1);
+  document.getElementById('set-timer').value = settings.timerMinutes;
+  updateTimerBtn();
+
+  document.getElementById('set-voice').onchange = function () { settings.voiceId = this.value; saveSettings(); document.getElementById('bar-voice').value = this.value; };
+  document.getElementById('set-rate').oninput = function () { settings.rate = parseFloat(this.value); document.getElementById('set-rate-val').textContent = settings.rate.toFixed(2) + 'x'; saveSettings(); };
+  document.getElementById('set-pitch').oninput = function () { settings.pitch = parseFloat(this.value); document.getElementById('set-pitch-val').textContent = settings.pitch.toFixed(1); saveSettings(); };
+  document.getElementById('set-timer').onchange = function () { settings.timerMinutes = parseInt(this.value); saveSettings(); updateTimerBtn(); };
+}
+
+async function testVoice() {
+  const btn = document.getElementById('test-btn');
+  const v = EDGE_VOICES.find(x => x.id === settings.voiceId);
+  const text = v ? `你好，我是${v.name}，这是语音测试。` : '你好，这是语音测试。';
+
+  // 先试 Edge TTS
+  btn.textContent = '正在测试 Edge TTS...';
+  try {
+    const data = await edgeTTSSpeak(text, settings.voiceId, settings.rate, settings.pitch);
+    const blob = new Blob([data], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    await audio.play();
+    btn.textContent = 'Edge TTS 成功!';
+    edgeTTSFailed = false;
+    setTimeout(() => { btn.textContent = '播放测试'; }, 3000);
+    return;
+  } catch (e) {
+    console.warn('[Edge TTS 测试失败]', e.message);
+    btn.textContent = 'Edge TTS 失败，尝试系统语音...';
+    edgeTTSFailed = true;
+  }
+
+  // 回退系统语音
+  await new Promise(r => setTimeout(r, 500));
+  const synth = window.speechSynthesis;
+  if (synth) {
+    synth.cancel();
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.lang = 'zh-CN'; utt.rate = settings.rate; utt.pitch = settings.pitch;
+    const voices = synth.getVoices().filter(v => /^zh/i.test(v.lang));
+    if (voices.length > 0) utt.voice = voices[0];
+    utt.onend = () => { btn.textContent = '系统语音 成功!'; setTimeout(() => { btn.textContent = '播放测试'; }, 3000); };
+    utt.onerror = () => { btn.textContent = '系统语音也失败'; setTimeout(() => { btn.textContent = '播放测试'; }, 3000); };
+    synth.speak(utt);
+  } else {
+    btn.textContent = '无可用语音引擎';
+    setTimeout(() => { btn.textContent = '播放测试'; }, 3000);
+  }
+}
+
+// ==================== 启动 ====================
+
+loadState();
+renderFileList();
+initSettingsUI();
+
+// 注册 PWA Service Worker
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
