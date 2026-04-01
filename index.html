@@ -539,38 +539,67 @@ function speakWithSystem(text, myGen, onEnd) {
   synth.speak(utterance);
 }
 
-let edgeTTSFailed = false; // 标记 Edge TTS 是否已失败，避免每句都超时等待
+let edgeTTSFailed = false;
+let prefetchCache = {}; // { index: ArrayBuffer } 预加载缓存
 
-async function speakSentence(text, onEnd) {
+function clearPrefetch() { prefetchCache = {}; }
+
+async function fetchAudio(text) {
+  if (!edgeTTSFailed) {
+    try {
+      const data = await edgeTTSSpeak(text, settings.voiceId, settings.rate, settings.pitch);
+      if (data && data.byteLength > 0) return { type: 'edge', data };
+    } catch (e) {
+      console.warn('[Edge TTS 失败]', e.message);
+      edgeTTSFailed = true;
+    }
+  }
+  return { type: 'system' };
+}
+
+// 预加载下一句
+function prefetchNext(idx) {
+  if (idx >= sentences.length || prefetchCache[idx]) return;
+  const text = sentences[idx];
+  fetchAudio(text).then(result => {
+    if (result.type === 'edge') prefetchCache[idx] = result.data;
+  }).catch(() => {});
+}
+
+async function speakSentence(text, idx, onEnd) {
   cancelCurrent();
   const myGen = speakGen;
 
-  // 先尝试 Edge TTS（除非已确认失败）
-  if (!edgeTTSFailed) {
+  // 立即开始预加载下一句
+  prefetchNext(idx + 1);
+
+  // 检查是否有预加载的缓存
+  let audioData = prefetchCache[idx];
+  delete prefetchCache[idx];
+
+  if (!audioData && !edgeTTSFailed) {
     try {
-      const audioData = await edgeTTSSpeak(text, settings.voiceId, settings.rate, settings.pitch);
-      if (myGen !== speakGen) return;
-      if (!audioData || audioData.byteLength === 0) throw new Error('空数据');
-
-      const blob = new Blob([audioData], { type: 'audio/mpeg' });
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      currentAudio = audio;
-
-      audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; if (myGen === speakGen && onEnd) onEnd(); };
-      audio.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; if (myGen === speakGen && onEnd) onEnd(); };
-      await audio.play();
-      return; // Edge TTS 成功
+      audioData = await edgeTTSSpeak(text, settings.voiceId, settings.rate, settings.pitch);
+      if (!audioData || audioData.byteLength === 0) audioData = null;
     } catch (e) {
       console.warn('[Edge TTS 失败，回退系统语音]', e.message);
-      edgeTTSFailed = true; // 后续句子直接用系统语音，不再等超时
-      if (myGen !== speakGen) return;
+      edgeTTSFailed = true;
     }
   }
 
-  // 回退到系统语音
   if (myGen !== speakGen) return;
-  speakWithSystem(text, myGen, onEnd);
+
+  if (audioData) {
+    const blob = new Blob([audioData], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    currentAudio = audio;
+    audio.onended = () => { URL.revokeObjectURL(url); currentAudio = null; if (myGen === speakGen && onEnd) onEnd(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); currentAudio = null; if (myGen === speakGen && onEnd) onEnd(); };
+    await audio.play();
+  } else {
+    speakWithSystem(text, myGen, onEnd);
+  }
 }
 
 function speakNext() {
@@ -582,7 +611,7 @@ function speakNext() {
   updateProgress();
   updateMediaSession();
 
-  speakSentence(sentences[currentIndex], () => {
+  speakSentence(sentences[currentIndex], currentIndex, () => {
     currentIndex++;
     updateProgress();
     if (isReading && !isPaused) speakNext();
@@ -610,6 +639,7 @@ function stopReading() {
   isPaused = false;
   clearHighlight();
   clearTimer();
+  clearPrefetch();
   document.getElementById('player-bar').classList.remove('visible');
   document.getElementById('tab-bar').classList.remove('hidden');
 }
@@ -685,6 +715,7 @@ function cycleSpeed() {
   document.getElementById('speed-btn').textContent = settings.rate.toFixed(2) + 'x';
   document.getElementById('set-rate').value = settings.rate;
   document.getElementById('set-rate-val').textContent = settings.rate.toFixed(2) + 'x';
+  clearPrefetch();
   if (isReading && !isPaused) { cancelCurrent(); speakNext(); }
 }
 
@@ -692,6 +723,7 @@ function switchVoice(voiceId) {
   settings.voiceId = voiceId;
   saveSettings();
   document.getElementById('set-voice').value = voiceId;
+  clearPrefetch(); edgeTTSFailed = false;
   if (isReading && !isPaused) { cancelCurrent(); speakNext(); }
 }
 
