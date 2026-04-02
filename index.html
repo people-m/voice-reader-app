@@ -10,6 +10,7 @@
 <title>语音阅读器</title>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 :root {
@@ -300,7 +301,7 @@ input[type="file"] { display: none; }
     <button class="import-fab secondary" onclick="document.getElementById('folder-input').click()" title="导入文件夹">&#128193;</button>
     <button class="import-fab primary" onclick="document.getElementById('file-input').click()" title="导入文件">+</button>
   </div>
-  <input type="file" id="file-input" accept=".md,.txt,.text,.markdown,.epub,.html,.htm,.docx" multiple>
+  <input type="file" id="file-input" accept=".md,.txt,.text,.markdown,.epub,.html,.htm,.docx,.pdf" multiple>
   <input type="file" id="folder-input" webkitdirectory multiple>
 </div>
 
@@ -372,6 +373,7 @@ input[type="file"] { display: none; }
         TXT / MD (纯文本、Markdown)<br>
         EPUB (电子书)<br>
         DOCX (Word文档)<br>
+        PDF (文字版)<br>
         HTML / HTM (网页)
       </div>
     </div>
@@ -570,6 +572,11 @@ async function parseFileContent(file) {
     return await parseDocx(buf);
   }
 
+  if (ext === 'pdf') {
+    const buf = await file.arrayBuffer();
+    return await parsePdf(buf);
+  }
+
   return await file.text();
 }
 
@@ -649,6 +656,21 @@ async function parseDocx(arrayBuffer) {
   const result = await mammoth.extractRawText({ arrayBuffer });
   if (!result.value || !result.value.trim()) throw new Error('DOCX 文件无文字内容');
   return result.value.trim();
+}
+
+async function parsePdf(arrayBuffer) {
+  if (typeof pdfjsLib === 'undefined') throw new Error('PDF 解析库未加载，请检查网络连接');
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  let fullText = '';
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(item => item.str).join('');
+    if (pageText.trim()) fullText += pageText.trim() + '\n\n';
+  }
+  if (!fullText.trim()) throw new Error('PDF 文件无文字内容（可能是扫描版）');
+  return fullText.trim();
 }
 
 // ==================== 文本处理 ====================
@@ -906,7 +928,7 @@ function hideToast() {
   document.getElementById('import-toast').classList.remove('visible');
 }
 
-const SUPPORTED_EXTS = ['md', 'txt', 'text', 'markdown', 'epub', 'html', 'htm', 'docx'];
+const SUPPORTED_EXTS = ['md', 'txt', 'text', 'markdown', 'epub', 'html', 'htm', 'docx', 'pdf'];
 
 document.getElementById('file-input').addEventListener('change', (e) => importFiles(e.target.files, e.target));
 document.getElementById('folder-input').addEventListener('change', (e) => importFiles(e.target.files, e.target));
@@ -939,7 +961,7 @@ async function importFiles(fileList, inputEl) {
       const text = await parseFileContent(file);
       if (!text || text.trim().length < 10) { failed++; continue; }
       const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      const name = file.name.replace(/\.(md|txt|text|markdown|epub|html|htm|docx)$/i, '');
+      const name = file.name.replace(/\.(md|txt|text|markdown|epub|html|htm|docx|pdf)$/i, '');
       files.push({
         id, name, text,
         addedDate: new Date().toLocaleDateString('zh-CN'),
