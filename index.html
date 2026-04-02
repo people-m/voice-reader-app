@@ -228,6 +228,10 @@ input[type="file"] { display: none; }
     <div class="setting-group">
       <h3>阅读设置</h3>
       <div class="setting-row">
+        <label>连续播放（自动下一个）</label>
+        <input type="checkbox" id="set-auto-next" style="width:20px;height:20px;accent-color:var(--accent);">
+      </div>
+      <div class="setting-row">
         <label>定时停止</label>
         <select id="set-timer">
           <option value="0">不定时</option>
@@ -267,6 +271,7 @@ input[type="file"] { display: none; }
   <div class="player-extras">
     <button id="speed-btn" onclick="cycleSpeed()">1.00x</button>
     <select id="bar-voice" onchange="switchVoice(this.value)"></select>
+    <button id="auto-next-btn" onclick="toggleAutoNext()">连播</button>
     <button id="timer-btn" onclick="cycleTimer()">定时</button>
     <span class="timer-display" id="timer-display"></span>
   </div>
@@ -415,6 +420,7 @@ function splitSentences(text) {
 
 let settings = {
   voiceId: 'zh-CN-XiaoxiaoNeural', rate: 1.0, pitch: 1.0, timerMinutes: 0,
+  autoNext: true, // 自动播放下一个文件
 };
 let files = []; // { id, name, text, addedDate }
 let currentFileId = null;
@@ -447,17 +453,22 @@ function renderFileList() {
     container.innerHTML = '<div class="empty-state"><div class="icon">&#128214;</div><p>还没有导入文件<br>点击右下角 + 导入 .md 或 .txt 文件</p></div>';
     return;
   }
-  container.innerHTML = files.map(f => `
-    <div class="file-item" onclick="openFile('${f.id}')">
+  const progressData = JSON.parse(localStorage.getItem('vr_progress') || '{}');
+  container.innerHTML = files.map(f => {
+    const isPlaying = isReading && currentFileId === f.id;
+    const savedProgress = progressData[f.id];
+    const progressHint = savedProgress > 0 ? ` · 续读第${savedProgress}句` : '';
+    return `
+    <div class="file-item${isPlaying ? ' playing' : ''}" onclick="openFile('${f.id}')" style="${isPlaying ? 'border-color:var(--accent);' : ''}">
       <div class="file-info">
-        <h3>${esc(f.name)}</h3>
-        <span>${f.text.length} 字 · ${f.addedDate}</span>
+        <h3>${isPlaying ? '&#9654; ' : ''}${esc(f.name)}</h3>
+        <span>${f.text.length} 字 · ${f.addedDate}${progressHint}</span>
       </div>
       <div class="file-actions">
         <button class="del-btn" onclick="event.stopPropagation();deleteFile('${f.id}')">&#128465;</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -478,6 +489,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
 function deleteFile(id) {
   if (!confirm('确定删除？')) return;
   files = files.filter(f => f.id !== id);
+  clearReadProgress(id);
   saveFiles();
   renderFileList();
 }
@@ -503,8 +515,9 @@ function openFile(id) {
   ).join('');
 
   showPage('reader');
-  // 自动开始朗读
-  currentIndex = 0;
+  // 恢复上次阅读进度
+  currentIndex = loadReadProgress(id);
+  if (currentIndex >= sentences.length) currentIndex = 0;
   startReading();
 }
 
@@ -604,7 +617,11 @@ async function speakSentence(text, idx, onEnd) {
 
 function speakNext() {
   if (!isReading || currentIndex >= sentences.length) {
-    if (isReading) stopReading();
+    if (isReading) {
+      // 尝试自动切换到下一个文件
+      if (settings.autoNext && autoNextFile()) return;
+      stopReading();
+    }
     return;
   }
   highlightSentence(currentIndex);
@@ -614,6 +631,7 @@ function speakNext() {
   speakSentence(sentences[currentIndex], currentIndex, () => {
     currentIndex++;
     updateProgress();
+    if (currentIndex % 5 === 0) saveReadProgress(); // 每5句保存一次进度
     if (isReading && !isPaused) speakNext();
   });
 }
@@ -628,6 +646,7 @@ function startReading() {
 
   if (settings.timerMinutes > 0) startTimer(settings.timerMinutes);
 
+  requestWakeLock();
   updateProgress();
   initMediaSession();
   speakNext();
@@ -640,8 +659,36 @@ function stopReading() {
   clearHighlight();
   clearTimer();
   clearPrefetch();
+  releaseWakeLock();
+  saveReadProgress();
   document.getElementById('player-bar').classList.remove('visible');
   document.getElementById('tab-bar').classList.remove('hidden');
+  renderFileList(); // 刷新文件列表状态
+}
+
+function autoNextFile() {
+  if (!currentFileId || files.length <= 1) return false;
+  const idx = files.findIndex(f => f.id === currentFileId);
+  if (idx < 0 || idx >= files.length - 1) return false;
+  const nextFile = files[idx + 1];
+  // 保存当前文件已读完
+  clearReadProgress(currentFileId);
+  // 切换到下一个文件
+  cancelCurrent();
+  clearPrefetch();
+  currentFileId = nextFile.id;
+  document.getElementById('reader-title').textContent = nextFile.name;
+  const plain = stripMarkdown(nextFile.text);
+  sentences = splitSentences(plain);
+  const contentEl = document.getElementById('reader-content');
+  contentEl.innerHTML = sentences.map((s, i) =>
+    `<span class="sentence" id="s-${i}">${esc(s)}</span>`
+  ).join('');
+  currentIndex = 0;
+  updateProgress();
+  initMediaSession();
+  speakNext();
+  return true;
 }
 
 function togglePause() {
@@ -736,6 +783,18 @@ function cycleTimer() {
   updateTimerBtn();
   if (settings.timerMinutes > 0 && isReading) startTimer(settings.timerMinutes);
   else clearTimer();
+}
+
+function toggleAutoNext() {
+  settings.autoNext = !settings.autoNext;
+  saveSettings();
+  updateAutoNextBtn();
+  document.getElementById('set-auto-next').checked = settings.autoNext;
+}
+
+function updateAutoNextBtn() {
+  const btn = document.getElementById('auto-next-btn');
+  btn.className = settings.autoNext ? 'active-tag' : '';
 }
 
 function updateTimerBtn() {
@@ -846,8 +905,11 @@ function initSettingsUI() {
   document.getElementById('set-pitch').value = settings.pitch;
   document.getElementById('set-pitch-val').textContent = settings.pitch.toFixed(1);
   document.getElementById('set-timer').value = settings.timerMinutes;
+  document.getElementById('set-auto-next').checked = settings.autoNext;
   updateTimerBtn();
+  updateAutoNextBtn();
 
+  document.getElementById('set-auto-next').onchange = function () { settings.autoNext = this.checked; saveSettings(); };
   document.getElementById('set-voice').onchange = function () { settings.voiceId = this.value; saveSettings(); document.getElementById('bar-voice').value = this.value; };
   document.getElementById('set-rate').oninput = function () { settings.rate = parseFloat(this.value); document.getElementById('set-rate-val').textContent = settings.rate.toFixed(2) + 'x'; saveSettings(); };
   document.getElementById('set-pitch').oninput = function () { settings.pitch = parseFloat(this.value); document.getElementById('set-pitch-val').textContent = settings.pitch.toFixed(1); saveSettings(); };
@@ -894,6 +956,55 @@ async function testVoice() {
     btn.textContent = '无可用语音引擎';
     setTimeout(() => { btn.textContent = '播放测试'; }, 3000);
   }
+}
+
+// ==================== Wake Lock（后台播放） ====================
+
+let wakeLock = null;
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (_) {}
+}
+
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+}
+
+// 页面重新可见时重新获取 Wake Lock
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isReading && !isPaused) {
+    requestWakeLock();
+  }
+});
+
+// ==================== 阅读进度 ====================
+
+function saveReadProgress() {
+  if (!currentFileId || !sentences.length) return;
+  try {
+    const progress = JSON.parse(localStorage.getItem('vr_progress') || '{}');
+    progress[currentFileId] = currentIndex;
+    localStorage.setItem('vr_progress', JSON.stringify(progress));
+  } catch (_) {}
+}
+
+function loadReadProgress(fileId) {
+  try {
+    const progress = JSON.parse(localStorage.getItem('vr_progress') || '{}');
+    return progress[fileId] || 0;
+  } catch (_) { return 0; }
+}
+
+function clearReadProgress(fileId) {
+  try {
+    const progress = JSON.parse(localStorage.getItem('vr_progress') || '{}');
+    delete progress[fileId];
+    localStorage.setItem('vr_progress', JSON.stringify(progress));
+  } catch (_) {}
 }
 
 // ==================== 启动 ====================
